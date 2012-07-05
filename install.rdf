@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?><RDF xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:em="http://www.mozilla.org/2004/em-rdf#">
+  <Description about="urn:mozilla:install-manifest">
+    <em:id>adb@glandium.org</em:id>
+    <em:version>0.0.1</em:version>
+    <em:type>2</em:type>
+    <em:bootstrap>true</em:bootstrap>
+
+    <!-- Target Application this extension can install into, 
+         with minimum and maximum supported versions. For a list 
+         of valid values, see:
+
+         https://addons.mozilla.org/en-US/firefox/pages/appversions
+     --> 
+
+    <!-- Firefox -->
+    <em:targetApplication>
+      <Description>
+        <em:id>{ec8030f7-c20a-464f-9b0e-13a3a9e97384}</em:id>
+        <em:minVersion>4.0b10pre</em:minVersion>
+        <em:maxVersion>17.0a1</em:maxVersion>
+      </Description>
+    </em:targetApplication>
+
+    <!-- Fennec -->
+    <em:targetApplication>
+      <Description>
+        <em:id>{a23983c0-fd0e-11dc-95ff-0800200c9a66}</em:id>
+        <em:minVersion>4.0b4pre</em:minVersion>
+        <em:maxVersion>17.0a1</em:maxVersion>
+      </Description>
+    </em:targetApplication>
+
+    <!-- Fennec Native -->
+    <em:targetApplication>
+      <Description>
+        <em:id>{aa3c5121-dab2-40e2-81ca-7ea25febc110}</em:id>
+        <em:minVersion>10.0a1</em:minVersion>
+        <em:maxVersion>17.0a1</em:maxVersion>
+      </Description>
+    </em:targetApplication>
+
+    <!-- Seamonkey -->
+    <em:targetApplication>
+      <Description>
+        <em:id>{92650c4d-4b8e-4d2a-b7eb-24ecf4f6b63a}</em:id>
+        <em:minVersion>2.1</em:minVersion>
+        <em:maxVersion>2.11a1</em:maxVersion>
+      </Description>
+    </em:targetApplication>
+
+    <!-- Thunderbird -->
+    <em:targetApplication>
+      <Description>
+        <em:id>{3550f703-e582-4d05-9a08-453d09bdfdc6}</em:id>
+        <em:minVersion>5.0b1</em:minVersion>
+        <em:maxVersion>14.0a1</em:maxVersion>
+      </Description>
+    </em:targetApplication>
+
+    <!-- Front End MetaData -->
+    <em:name>Android Debug Bridge For Firefox</em:name>
+    <em:description>Android Debug Bridge For Firefox.</em:description>
+    <em:creator>Mike Hommey &lt;mh@glandium.org&gt;</em:creator>
+    <em:iconURL/>
+    
+    <em:optionsURL/>
+    
+  </Description>
+</RDF>
