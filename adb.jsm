@@ -59,7 +59,7 @@ let ADB = {
         var length = data.charCodeAt(16) + (data.charCodeAt(17) << 8) +
                      (data.charCodeAt(18) << 16) + (data.charCodeAt(19) << 24);
         this.read(length, function (data) {
-          dentries.push({ name: data, mode: mode, size: size, time: time });
+          dentries.push({ name: data, mode: mode, size: size, time: new Date(time * 1000) });
           read_dentry.call(this);
         });
       });
@@ -70,6 +70,68 @@ let ADB = {
       this.hostService('sync:', function () {
         this.syncRequest('LIST', dir, function () {
           read_dentry.call(this);
+        });
+      });
+    });
+  },
+
+  /**
+   * Returns file stat for the given path on the given device.
+   *
+   * @param serial    The device serial number.
+   * @param path      The path to get stat for.
+   * @param callback  A function to be called ...
+   */
+  stat: function ADB_getType(serial, path, callback) {
+    var client = new ADBClient();
+    client.hostService('host:transport:' + serial, function () {
+      this.hostService('sync:', function () {
+        this.syncRequest('STAT', path, function () {
+          this.read(16, function (data) {
+            if (data.substr(0, 4) != 'STAT')
+              throw 'Unexpected entity';
+            var mode = data.charCodeAt(4) + (data.charCodeAt(5) << 8) +
+                       (data.charCodeAt(6) << 16) + (data.charCodeAt(7) << 24);
+            var size = data.charCodeAt(8) + (data.charCodeAt(9) << 8) +
+                       (data.charCodeAt(10) << 16) + (data.charCodeAt(11) << 24);
+            var time = data.charCodeAt(12) + (data.charCodeAt(13) << 8) +
+                       (data.charCodeAt(14) << 16) + (data.charCodeAt(15) << 24);
+            callback.call(this, { mode: mode, size: size, time: new Date(time * 1000) });
+          });
+        });
+      });
+    });
+  },
+
+  /**
+   * Get contents from a given file on the given device.
+   *
+   * @param serial    The device serial number.
+   * @param path      The path to get stat for.
+   * @param output    An nsIOutputStream that will receive the file content.
+   */
+  getContent: function ADB_getContent(serial, path, output) {
+    function read_data() {
+      this.read(8, function (data) {
+        if (data.substr(0, 4) == 'DONE')
+          output.close();
+        else if (data.substr(0, 4) != 'DATA')
+          throw 'Unexpected entity';
+        var size = data.charCodeAt(4) + (data.charCodeAt(5) << 8) +
+                   (data.charCodeAt(6) << 16) + (data.charCodeAt(7) << 24);
+        Services.console.logStringMessage(size);
+        this.read(size, function (data) {
+          output.write(data, data.length);
+          read_data.call(this);
+        });
+      });
+    }
+
+    var client = new ADBClient();
+    client.hostService('host:transport:' + serial, function () {
+      this.hostService('sync:', function () {
+        this.syncRequest('RECV', path, function () {
+          read_data.call(this);
         });
       });
     });
@@ -227,8 +289,10 @@ ADBClient.prototype = Object.freeze({
   {
     var len = 0;
     try { len = input.available(); } catch(e) { }
-    if (len < this.length)
+    if (len < this.length) {
       this.input.asyncWait(this, 0, this.length - len, Services.tm.currentThread);
+      return;
+    }
 
     var bin = new BinaryInputStream(input);
     var data = bin.readBytes(this.length);

@@ -63,22 +63,29 @@ ADBProtocolHandler.prototype = {
       channel.setURI(uri);
       channel.contentStream = pipe.inputStream;
       channel.QueryInterface(Ci.nsIChannel);
-      channel.contentType = 'application/http-index-format';
       ADB.devices(function (devices) {
         var matching = [d for each (d in devices) if (d.serial.toLowerCase() == uri.host)];
         if (matching.length > 1)
           throw 'Ambiguous serial';
 
-        ADB.dirList(matching[0].serial, uri.path, function(dentries) {
-          var data = '300: ' + uri.spec + '\n' +
-                     '200: filename content-length last-modified file-type\n';
-          for each (var d in dentries) {
-            if (['.', '..'].every(function(n) n != d.name))
-              data += '201: ' + d.name + ' ' + d.size + ' ' + encodeURI((new Date(d.time * 1000)).toUTCString()) + ' ' + (d.mode & 0x4000 ? 'DIRECTORY' : (d.mode & 0xa000 == 0xa000 ? 'SYMLINK' : 'FILE')) + '\n';
-          }
+        ADB.stat(matching[0].serial, uri.path, function (stat) {
+          if (stat.mode & 0x4000)
+            ADB.dirList(matching[0].serial, uri.path, function(dentries) {
+              channel.contentType = 'application/http-index-format';
+              var data = '300: ' + uri.spec + '\n' +
+                         '200: filename content-length last-modified file-type\n';
+              for each (var d in dentries) {
+                if (['.', '..'].every(function(n) n != d.name))
+                  data += '201: ' + d.name + ' ' + d.size + ' ' + encodeURI(d.time.toUTCString()) + ' ' + (d.mode & 0x4000 ? 'DIRECTORY' : (d.mode & 0xa000 == 0xa000 ? 'SYMLINK' : 'FILE')) + '\n';
+              }
 
-          pipe.outputStream.write(data, data.length);
-          pipe.outputStream.close();
+              pipe.outputStream.write(data, data.length);
+              pipe.outputStream.close();
+            });
+          else {
+            channel.contentLength = stat.size;
+            ADB.getContent(matching[0].serial, uri.path, pipe.outputStream);
+          }
         });
       });
       return channel;
