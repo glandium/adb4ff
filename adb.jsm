@@ -32,6 +32,47 @@ let ADB = {
       }
       callback([device_split(d) for each (d in data.split('\n')) if (d)]);
     });
+  },
+
+  /**
+   * Returns a directory listing on a given device
+   *
+   * @param serial    The device serial number
+   * @param dir       The directory to list
+   * @param callback  A function to be called ...
+   */
+  dirList: function ADB_devices(serial, dir, callback) {
+    var dentries = [];
+
+    function read_dentry() {
+      this.read(20, function (data) {
+        if (data.substr(0, 4) == 'DONE')
+          callback(dentries);
+        else if (data.substr(0, 4) != 'DENT')
+          throw 'Unexpected entity';
+        var mode = data.charCodeAt(4) + (data.charCodeAt(5) << 8) +
+                     (data.charCodeAt(6) << 16) + (data.charCodeAt(7) << 24);
+        var size = data.charCodeAt(8) + (data.charCodeAt(9) << 8) +
+                     (data.charCodeAt(10) << 16) + (data.charCodeAt(11) << 24);
+        var time = data.charCodeAt(12) + (data.charCodeAt(13) << 8) +
+                     (data.charCodeAt(14) << 16) + (data.charCodeAt(15) << 24);
+        var length = data.charCodeAt(16) + (data.charCodeAt(17) << 8) +
+                     (data.charCodeAt(18) << 16) + (data.charCodeAt(19) << 24);
+        this.read(length, function (data) {
+          dentries.push({ name: data, mode: mode, size: size, time: time });
+          read_dentry.call(this);
+        });
+      });
+    }
+
+    var client = new ADBClient();
+    client.hostService('host:transport:' + serial, function () {
+      this.hostService('sync:', function () {
+        this.syncRequest('LIST', dir, function () {
+          read_dentry.call(this);
+        });
+      });
+    });
   }
 };
 
@@ -80,6 +121,21 @@ ADBClient.prototype = Object.freeze({
     this.hostService(request, function () {
       this.readString(callback);
     });
+  },
+
+  /**
+   * Performs a 'sync:' request to the ADB daemon on the device
+   *
+   * @param request    The request to perform.
+   * @param dir        The directory on which to apply it.
+   * @param callback   A function to call ...
+   */
+  syncRequest: function ADBClient_syncRequest(request, dir, callback) {
+    var l = dir.length;
+    var le_length = String.fromCharCode((l & 0xff), (l & 0xff00) >> 8,
+                                        (l & 0xff0000) >> 16,
+                                        (l & 0xff000000) >> 24);
+    this.write(request + le_length + dir, callback);
   },
 
   /**

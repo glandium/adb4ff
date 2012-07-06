@@ -56,6 +56,32 @@ ADBProtocolHandler.prototype = {
         pipe.outputStream.close();
       });
       return channel;
+    } else {
+      var channel = Cc['@mozilla.org/network/input-stream-channel;1'].createInstance(Ci.nsIInputStreamChannel);
+      var pipe = Cc['@mozilla.org/pipe;1'].createInstance(Ci.nsIPipe);
+      pipe.init(true, false, 0, 0, null);
+      channel.setURI(uri);
+      channel.contentStream = pipe.inputStream;
+      channel.QueryInterface(Ci.nsIChannel);
+      channel.contentType = 'application/http-index-format';
+      ADB.devices(function (devices) {
+        var matching = [d for each (d in devices) if (d.serial.toLowerCase() == uri.host)];
+        if (matching.length > 1)
+          throw 'Ambiguous serial';
+
+        ADB.dirList(matching[0].serial, uri.path, function(dentries) {
+          var data = '300: ' + uri.spec + '\n' +
+                     '200: filename content-length last-modified file-type\n';
+          for each (var d in dentries) {
+            if (['.', '..'].every(function(n) n != d.name))
+              data += '201: ' + d.name + ' ' + d.size + ' ' + encodeURI((new Date(d.time * 1000)).toUTCString()) + ' ' + (d.mode & 0x4000 ? 'DIRECTORY' : (d.mode & 0xa000 == 0xa000 ? 'SYMLINK' : 'FILE')) + '\n';
+          }
+
+          pipe.outputStream.write(data, data.length);
+          pipe.outputStream.close();
+        });
+      });
+      return channel;
     }
 
     var channel = Services.io.newChannel('resource://adb/index.html', null, null);
