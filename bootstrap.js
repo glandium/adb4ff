@@ -35,6 +35,29 @@ ADBProtocolHandler.prototype = {
 
   newChannel: function ADBProtocolHandler_newChannel(uri)
   {
+    Cu.import('resource://adb/adb.jsm');
+    if (!uri.host) {
+      var channel = Cc['@mozilla.org/network/input-stream-channel;1'].createInstance(Ci.nsIInputStreamChannel);
+      var pipe = Cc['@mozilla.org/pipe;1'].createInstance(Ci.nsIPipe);
+      pipe.init(true, false, 0, 0, null);
+      channel.setURI(uri);
+      channel.contentStream = pipe.inputStream;
+      channel.QueryInterface(Ci.nsIChannel);
+      channel.contentType = 'application/http-index-format';
+      ADB.devices(function(devices) {
+        var data = '300: adb:///\n' +
+                   '200: filename content-length last-modified file-type\n';
+        for each (var d in devices) {
+          if (d.status != 'offline')
+            data += '201: ' + d.serial + ' 0 Thu,%201%20Jan%201970%2000:00:00%20GMT DIRECTORY\n';
+        }
+
+        pipe.outputStream.write(data, data.length);
+        pipe.outputStream.close();
+      });
+      return channel;
+    }
+
     var channel = Services.io.newChannel('resource://adb/index.html', null, null);
     var principal = Services.scriptSecurityManager.getSystemPrincipal(uri);
     channel.originalURI = uri;
