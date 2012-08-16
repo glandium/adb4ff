@@ -91,12 +91,6 @@ ADBProtocolHandler.prototype = {
       });
       return channel;
     }
-
-    var channel = Services.io.newChannel('resource://adb/index.html', null, null);
-    var principal = Services.scriptSecurityManager.getSystemPrincipal(uri);
-    channel.originalURI = uri;
-    channel.owner = principal;
-    return channel;
   },
 
   newURI: function ADBProtocolHandler_newURI(spec, charset, baseURI)
