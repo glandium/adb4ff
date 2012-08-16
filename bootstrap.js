@@ -14,6 +14,8 @@ Cm.QueryInterface(Ci.nsIComponentRegistrar);
 Cu.import('resource://gre/modules/XPCOMUtils.jsm');
 Cu.import('resource://gre/modules/Services.jsm');
 
+var baseURL = null;
+
 function ADBProtocolHandler() {}
 
 ADBProtocolHandler.prototype = {
@@ -35,7 +37,6 @@ ADBProtocolHandler.prototype = {
 
   newChannel: function ADBProtocolHandler_newChannel(uri)
   {
-    Cu.import('resource://adb/adb.jsm');
     if (!uri.host) {
       var channel = Cc['@mozilla.org/network/input-stream-channel;1'].createInstance(Ci.nsIInputStreamChannel);
       var pipe = Cc['@mozilla.org/pipe;1'].createInstance(Ci.nsIPipe);
@@ -113,14 +114,12 @@ function startup(aData, aReason) {
                      ADBProtocolHandler.prototype.classDescription,
                      ADBProtocolHandler.prototype.contractID,
                      ADBProtocolHandlerFactory);
-  var fileuri = Services.io.newFileURI(aData.installPath);
-  if (!aData.installPath.isDirectory())
-    fileuri = Services.io.newURI('jar:' + fileuri.spec + '!/', null, null);
-  Services.io.getProtocolHandler('resource').QueryInterface(Ci.nsIResProtocolHandler).setSubstitution('adb', fileuri);
+  baseURL = aData.resourceURI.spec;
+  Cu.import(baseURL + '/adb.jsm');
 }
 
 function shutdown(aData, aReason) {
-  Services.io.getProtocolHandler('resource').QueryInterface(Ci.nsIResProtocolHandler).setSubstitution('adb', null);
+  Cu.unload(baseURL + '/adb.jsm');
   Cm.unregisterFactory(ADBProtocolHandler.prototype.classID, ADBProtocolHandlerFactory);
 }
 function install(aData, aReason) { }
