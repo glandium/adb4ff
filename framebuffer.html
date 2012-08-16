@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Framebuffer</title>
+<script type="text/javascript">
+const Cu = Components.utils;
+
+function init() {
+  Cu.import(document.location + 'adb.jsm');
+  var canvas = document.getElementById('canvas');
+
+  var convert5to8 = [];
+  for (var i = 0; i < Math.pow(2, 5); i++)
+    convert5to8[i] = (i * 527 + 23) >> 6;
+  var convert6to8 = [];
+  for (var i = 0; i < Math.pow(2, 6); i++)
+    convert6to8[i] = (i * 259 + 33) >> 6;
+
+  function mulTableFor(width) {
+    if (width == 5)
+      return convert5to8;
+    if (width == 6)
+      return convert6to8;
+    throw 'Unsupported';
+  }
+
+  ADB.devices(function (devices) {
+    var matching = [d for each (d in devices) if (d.serial.toLowerCase() == document.location.host)];
+    if (matching.length > 1)
+      throw 'Ambiguous serial';
+    ADB.getFrameBuffer(matching[0].serial, function (image) {
+      canvas.width = image.width;
+      canvas.height = image.height;
+      var ctx = canvas.getContext('2d');
+      var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      if (image.depth == 32 &&
+          image.redOffset == 0 && image.redWidth == 8 &&
+          image.greenOffset == 8 && image.greenWidth == 8 &&
+          image.blueOffset == 16 && image.blueWidth == 8 &&
+          image.alphaOffset == 24 && image.alphaWidth == 8)
+        for (var i = 0; i < image.size; i++) { imageData.data[i] = image.data.charCodeAt(i); }
+      else if (image.depth == 16 && image.alphaWidth == 0) {
+        var redShift = image.redOffset;
+        var greenShift = image.greenOffset;
+        var blueShift = image.blueOffset;
+        var redMask = (Math.pow(2, image.redWidth) - 1) << redShift;
+        var greenMask = (Math.pow(2, image.greenWidth) - 1) << greenShift;
+        var blueMask = (Math.pow(2, image.blueWidth) - 1) << blueShift;
+        var redMul = mulTableFor(image.redWidth);
+        var greenMul = mulTableFor(image.greenWidth);
+        var blueMul = mulTableFor(image.blueWidth);
+        for (var i = 0; i < image.size / 2; i++) {
+          var pixel = image.data.charCodeAt(i * 2) + (image.data.charCodeAt(i * 2 + 1) << 8);
+          imageData.data[i * 4] = redMul[(pixel & redMask) >> redShift];
+          imageData.data[i * 4 + 1] = greenMul[(pixel & greenMask) >> greenShift];
+          imageData.data[i * 4 + 2] = blueMul[(pixel & blueMask) >> blueShift];
+          imageData.data[i * 4 + 3] = 255;
+        }
+      }
+      ctx.putImageData(imageData, 0, 0);
+    });
+  });
+}
+
+window.addEventListener("load", init, false);
+</script>
+</head>
+<body>
+<canvas id='canvas'></canvas>
+</body>
+</html>

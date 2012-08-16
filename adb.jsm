@@ -131,6 +131,39 @@ let ADB = {
         });
       });
     });
+  },
+
+  getFrameBuffer: function ADB_getFrameBuffer(serial, callback) {
+    var client = new ADBClient();
+    client.hostService('host:transport:' + serial, function () {
+      this.hostService('framebuffer:', function () {
+        this.read(4, function(data) {
+          var version = read_uint32(data, 0);
+          if (version != 1)
+            throw 'Unsupported';
+          this.read(48, function (data) {
+            var image = {
+              depth: read_uint32(data, 0),
+              size: read_uint32(data, 4),
+              width: read_uint32(data, 8),
+              height: read_uint32(data, 12),
+              redOffset: read_uint32(data, 16),
+              redWidth: read_uint32(data, 20),
+              blueOffset: read_uint32(data, 24),
+              blueWidth: read_uint32(data, 28),
+              greenOffset: read_uint32(data, 32),
+              greenWidth: read_uint32(data, 36),
+              alphaOffset: read_uint32(data, 40),
+              alphaWidth: read_uint32(data, 44)
+            };
+            this.read(image.size, function (data) {
+              image.data = data;
+              callback.call(this, image);
+            });
+          });
+        });
+      });
+    });
   }
 };
 

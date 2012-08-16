@@ -16,6 +16,29 @@ Cu.import('resource://gre/modules/Services.jsm');
 
 var baseURL = null;
 
+function newADBDeviceListChannel(uri)
+{
+  var channel = Cc['@mozilla.org/network/input-stream-channel;1'].createInstance(Ci.nsIInputStreamChannel);
+  var pipe = Cc['@mozilla.org/pipe;1'].createInstance(Ci.nsIPipe);
+  pipe.init(true, false, 0, 0, null);
+  channel.setURI(uri);
+  channel.contentStream = pipe.inputStream;
+  channel.QueryInterface(Ci.nsIChannel);
+  channel.contentType = 'application/http-index-format';
+  ADB.devices(function(devices) {
+  var data = '300: ' + uri.scheme + ':///\n' +
+             '200: filename content-length last-modified file-type\n';
+    for each (var d in devices) {
+      if (d.status != 'offline')
+        data += '201: ' + d.serial + ' 0 Thu,%201%20Jan%201970%2000:00:00%20GMT DIRECTORY\n';
+    }
+
+    pipe.outputStream.write(data, data.length);
+    pipe.outputStream.close();
+  });
+  return channel;
+}
+
 function ADBProtocolHandler() {}
 
 ADBProtocolHandler.prototype = {
@@ -37,60 +60,41 @@ ADBProtocolHandler.prototype = {
 
   newChannel: function ADBProtocolHandler_newChannel(uri)
   {
-    if (!uri.host) {
-      var channel = Cc['@mozilla.org/network/input-stream-channel;1'].createInstance(Ci.nsIInputStreamChannel);
-      var pipe = Cc['@mozilla.org/pipe;1'].createInstance(Ci.nsIPipe);
-      pipe.init(true, false, 0, 0, null);
-      channel.setURI(uri);
-      channel.contentStream = pipe.inputStream;
-      channel.QueryInterface(Ci.nsIChannel);
-      channel.contentType = 'application/http-index-format';
-      ADB.devices(function(devices) {
-        var data = '300: adb:///\n' +
-                   '200: filename content-length last-modified file-type\n';
-        for each (var d in devices) {
-          if (d.status != 'offline')
-            data += '201: ' + d.serial + ' 0 Thu,%201%20Jan%201970%2000:00:00%20GMT DIRECTORY\n';
+    if (!uri.host)
+      return newADBDeviceListChannel(uri);
+
+    var channel = Cc['@mozilla.org/network/input-stream-channel;1'].createInstance(Ci.nsIInputStreamChannel);
+    var pipe = Cc['@mozilla.org/pipe;1'].createInstance(Ci.nsIPipe);
+    pipe.init(true, false, 0, 0, null);
+    channel.setURI(uri);
+    channel.contentStream = pipe.inputStream;
+    channel.QueryInterface(Ci.nsIChannel);
+    ADB.devices(function (devices) {
+      var matching = [d for each (d in devices) if (d.serial.toLowerCase() == uri.host)];
+      if (matching.length > 1)
+        throw 'Ambiguous serial';
+
+      ADB.stat(matching[0].serial, uri.path, function (stat) {
+        if (stat.mode & 0x4000)
+          ADB.dirList(matching[0].serial, uri.path, function(dentries) {
+            channel.contentType = 'application/http-index-format';
+            var data = '300: ' + uri.spec + '\n' +
+                       '200: filename content-length last-modified file-type\n';
+            for each (var d in dentries) {
+              if (['.', '..'].every(function(n) n != d.name))
+                data += '201: ' + d.name + ' ' + d.size + ' ' + encodeURI(d.time.toUTCString()) + ' ' + (d.mode & 0x4000 ? 'DIRECTORY' : (d.mode & 0xa000 == 0xa000 ? 'SYMLINK' : 'FILE')) + '\n';
+            }
+
+            pipe.outputStream.write(data, data.length);
+            pipe.outputStream.close();
+          });
+        else {
+          channel.contentLength = stat.size;
+          ADB.getContent(matching[0].serial, uri.path, pipe.outputStream);
         }
-
-        pipe.outputStream.write(data, data.length);
-        pipe.outputStream.close();
       });
-      return channel;
-    } else {
-      var channel = Cc['@mozilla.org/network/input-stream-channel;1'].createInstance(Ci.nsIInputStreamChannel);
-      var pipe = Cc['@mozilla.org/pipe;1'].createInstance(Ci.nsIPipe);
-      pipe.init(true, false, 0, 0, null);
-      channel.setURI(uri);
-      channel.contentStream = pipe.inputStream;
-      channel.QueryInterface(Ci.nsIChannel);
-      ADB.devices(function (devices) {
-        var matching = [d for each (d in devices) if (d.serial.toLowerCase() == uri.host)];
-        if (matching.length > 1)
-          throw 'Ambiguous serial';
-
-        ADB.stat(matching[0].serial, uri.path, function (stat) {
-          if (stat.mode & 0x4000)
-            ADB.dirList(matching[0].serial, uri.path, function(dentries) {
-              channel.contentType = 'application/http-index-format';
-              var data = '300: ' + uri.spec + '\n' +
-                         '200: filename content-length last-modified file-type\n';
-              for each (var d in dentries) {
-                if (['.', '..'].every(function(n) n != d.name))
-                  data += '201: ' + d.name + ' ' + d.size + ' ' + encodeURI(d.time.toUTCString()) + ' ' + (d.mode & 0x4000 ? 'DIRECTORY' : (d.mode & 0xa000 == 0xa000 ? 'SYMLINK' : 'FILE')) + '\n';
-              }
-
-              pipe.outputStream.write(data, data.length);
-              pipe.outputStream.close();
-            });
-          else {
-            channel.contentLength = stat.size;
-            ADB.getContent(matching[0].serial, uri.path, pipe.outputStream);
-          }
-        });
-      });
-      return channel;
-    }
+    });
+    return channel;
   },
 
   newURI: function ADBProtocolHandler_newURI(spec, charset, baseURI)
@@ -103,11 +107,69 @@ ADBProtocolHandler.prototype = {
 
 const ADBProtocolHandlerFactory = XPCOMUtils.generateNSGetFactory([ADBProtocolHandler])(ADBProtocolHandler.prototype.classID);
 
+function ADBViewProtocolHandler() {}
+
+ADBViewProtocolHandler.prototype = {
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsIProtocolHandler]),
+  classDescription: 'ADB View Protocol Handler',
+  classID: Components.ID('{cdd72632-8743-4532-8ff5-bd9ffd95f1b9}'),
+  contractID: '@mozilla.org/network/protocol;1?name=adbview',
+
+  scheme: 'adbview',
+  defaultPort: -1,
+  protocolFlags: Ci.nsIProtocolHandler.URI_IS_LOCAL_FILE |
+                 Ci.nsIProtocolHandler.URI_NOAUTH |
+                 Ci.nsIProtocolHandler.URI_IS_LOCAL_RESOURCE,
+
+  allowPort: function ADBProtocolHandler_allowPort(port, scheme)
+  {
+    return false;
+  },
+
+  newChannel: function ADBProtocolHandler_newChannel(uri)
+  {
+    if (!uri.host)
+      return newADBDeviceListChannel(uri);
+    var path;
+    if (uri.path == '/') {
+      path = baseURL + '/framebuffer.html';
+    } else if (uri.path == '/adb.jsm') {
+      path = baseURL + '/adb.jsm';
+    } else {
+      throw 'Error';
+    }
+
+    var channel = Services.io.newChannel(path, null, null);
+    var principal = Services.scriptSecurityManager.getSystemPrincipal(uri);
+    channel.originalURI = uri;
+    channel.owner = principal;
+    return channel;
+  },
+
+  getURIFlags: function(uri)
+  {
+    return Ci.nsIAboutModule.URI_SAFE_FOR_UNTRUSTED_CONTENT | Ci.nsIAboutModule.ALLOW_SCRIPT;
+  },
+
+  newURI: function ADBProtocolHandler_newURI(spec, charset, baseURI)
+  {
+    var uri = Cc['@mozilla.org/network/standard-url;1'].createInstance(Ci.nsIStandardURL);
+    uri.init(Ci.nsIStandardURL.URLTYPE_AUTHORITY, -1, spec, charset, baseURI);
+    return uri;
+  }
+};
+
+const ADBViewProtocolHandlerFactory = XPCOMUtils.generateNSGetFactory([ADBViewProtocolHandler])(ADBViewProtocolHandler.prototype.classID);
+
 function startup(aData, aReason) {
   Cm.registerFactory(ADBProtocolHandler.prototype.classID,
                      ADBProtocolHandler.prototype.classDescription,
                      ADBProtocolHandler.prototype.contractID,
                      ADBProtocolHandlerFactory);
+  Cm.registerFactory(ADBViewProtocolHandler.prototype.classID,
+                     ADBViewProtocolHandler.prototype.classDescription,
+                     ADBViewProtocolHandler.prototype.contractID,
+                     ADBViewProtocolHandlerFactory);
   baseURL = aData.resourceURI.spec;
   Cu.import(baseURL + '/adb.jsm');
 }
@@ -115,6 +177,7 @@ function startup(aData, aReason) {
 function shutdown(aData, aReason) {
   Cu.unload(baseURL + '/adb.jsm');
   Cm.unregisterFactory(ADBProtocolHandler.prototype.classID, ADBProtocolHandlerFactory);
+  Cm.unregisterFactory(ADBViewProtocolHandler.prototype.classID, ADBViewProtocolHandlerFactory);
 }
 function install(aData, aReason) { }
 function uninstall(aData, aReason) { }
