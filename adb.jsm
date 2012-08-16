@@ -14,6 +14,11 @@ Components.utils.import("resource://gre/modules/Services.jsm");
 
 let EXPORTED_SYMBOLS = ['ADB'];
 
+function read_uint32(str, offset) {
+  return str.charCodeAt(offset) + (str.charCodeAt(offset + 1) << 8) +
+         (str.charCodeAt(offset + 2) << 16) + (str.charCodeAt(offset + 3) << 24);
+}
+
 let ADB = {
   /**
    * Returns a list of connected Android devices
@@ -50,14 +55,10 @@ let ADB = {
           callback(dentries);
         else if (data.substr(0, 4) != 'DENT')
           throw 'Unexpected entity';
-        var mode = data.charCodeAt(4) + (data.charCodeAt(5) << 8) +
-                     (data.charCodeAt(6) << 16) + (data.charCodeAt(7) << 24);
-        var size = data.charCodeAt(8) + (data.charCodeAt(9) << 8) +
-                     (data.charCodeAt(10) << 16) + (data.charCodeAt(11) << 24);
-        var time = data.charCodeAt(12) + (data.charCodeAt(13) << 8) +
-                     (data.charCodeAt(14) << 16) + (data.charCodeAt(15) << 24);
-        var length = data.charCodeAt(16) + (data.charCodeAt(17) << 8) +
-                     (data.charCodeAt(18) << 16) + (data.charCodeAt(19) << 24);
+        var mode = read_uint32(data, 4);
+        var size = read_uint32(data, 8);
+        var time = read_uint32(data, 12);
+        var length = read_uint32(data, 16);
         this.read(length, function (data) {
           dentries.push({ name: data, mode: mode, size: size, time: new Date(time * 1000) });
           read_dentry.call(this);
@@ -90,12 +91,9 @@ let ADB = {
           this.read(16, function (data) {
             if (data.substr(0, 4) != 'STAT')
               throw 'Unexpected entity';
-            var mode = data.charCodeAt(4) + (data.charCodeAt(5) << 8) +
-                       (data.charCodeAt(6) << 16) + (data.charCodeAt(7) << 24);
-            var size = data.charCodeAt(8) + (data.charCodeAt(9) << 8) +
-                       (data.charCodeAt(10) << 16) + (data.charCodeAt(11) << 24);
-            var time = data.charCodeAt(12) + (data.charCodeAt(13) << 8) +
-                       (data.charCodeAt(14) << 16) + (data.charCodeAt(15) << 24);
+            var mode = read_uint32(data, 4);
+            var size = read_uint32(data, 8);
+            var time = read_uint32(data, 12);
             callback.call(this, { mode: mode, size: size, time: new Date(time * 1000) });
           });
         });
@@ -117,9 +115,7 @@ let ADB = {
           output.close();
         else if (data.substr(0, 4) != 'DATA')
           throw 'Unexpected entity';
-        var size = data.charCodeAt(4) + (data.charCodeAt(5) << 8) +
-                   (data.charCodeAt(6) << 16) + (data.charCodeAt(7) << 24);
-        Services.console.logStringMessage(size);
+        var size = read_uint32(data, 4);
         this.read(size, function (data) {
           output.write(data, data.length);
           read_data.call(this);
