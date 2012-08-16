@@ -285,13 +285,18 @@ ADBClient.prototype = Object.freeze({
   {
     var len = 0;
     try { len = input.available(); } catch(e) { }
-    if (len < this.length) {
-      this.input.asyncWait(this, 0, this.length - len, Services.tm.currentThread);
+    var bin = new BinaryInputStream(input);
+    if (len > this.length)
+      len = this.length;
+    this.buf += bin.readBytes(len);
+    this.length -= len;
+
+    if (this.length) {
+      this.input.asyncWait(this, 0, this.length, Services.tm.currentThread);
       return;
     }
 
-    var bin = new BinaryInputStream(input);
-    var data = bin.readBytes(this.length);
+    var data = this.buf;
     delete this.buf;
     this.callback.call(this, data);
   }
