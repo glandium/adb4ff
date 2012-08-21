@@ -180,15 +180,10 @@ ADBChannel.prototype = {
   }
 };
 
-function ADBProtocolHandler() {}
+function GenericADBProtocolHandler() {}
 
-ADBProtocolHandler.prototype = {
+GenericADBProtocolHandler.prototype = {
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIProtocolHandler]),
-  classDescription: 'ADB Protocol Handler',
-  classID: Components.ID('{f783fdc4-239a-4f5e-a7d9-c60874996c13}'),
-  contractID: '@mozilla.org/network/protocol;1?name=adb',
-
-  scheme: 'adb',
   defaultPort: -1,
   protocolFlags: Ci.nsIProtocolHandler.URI_IS_LOCAL_FILE |
                  Ci.nsIProtocolHandler.URI_NOAUTH |
@@ -197,11 +192,6 @@ ADBProtocolHandler.prototype = {
   allowPort: function ADBProtocolHandler_allowPort(port, scheme)
   {
     return false;
-  },
-
-  newChannel: function ADBProtocolHandler_newChannel(uri)
-  {
-    return new ADBChannel(uri);
   },
 
   newURI: function ADBProtocolHandler_newURI(spec, charset, baseURI)
@@ -212,58 +202,51 @@ ADBProtocolHandler.prototype = {
   }
 };
 
+function ADBProtocolHandler() {}
+
+ADBProtocolHandler.prototype = new GenericADBProtocolHandler;
+ADBProtocolHandler.prototype.classDescription = 'ADB Protocol Handler';
+ADBProtocolHandler.prototype.classID = Components.ID('{f783fdc4-239a-4f5e-a7d9-c60874996c13}');
+ADBProtocolHandler.prototype.contractID = '@mozilla.org/network/protocol;1?name=adb';
+ADBProtocolHandler.prototype.scheme = 'adb';
+ADBProtocolHandler.prototype.newChannel = function ADBProtocolHandler_newChannel(uri)
+{
+  return new ADBChannel(uri);
+};
+
 const ADBProtocolHandlerFactory = XPCOMUtils.generateNSGetFactory([ADBProtocolHandler])(ADBProtocolHandler.prototype.classID);
 
 function ADBViewProtocolHandler() {}
 
-ADBViewProtocolHandler.prototype = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIProtocolHandler]),
-  classDescription: 'ADB View Protocol Handler',
-  classID: Components.ID('{cdd72632-8743-4532-8ff5-bd9ffd95f1b9}'),
-  contractID: '@mozilla.org/network/protocol;1?name=adbview',
+ADBViewProtocolHandler.prototype = new GenericADBProtocolHandler;
 
-  scheme: 'adbview',
-  defaultPort: -1,
-  protocolFlags: Ci.nsIProtocolHandler.URI_IS_LOCAL_FILE |
-                 Ci.nsIProtocolHandler.URI_NOAUTH |
-                 Ci.nsIProtocolHandler.URI_IS_LOCAL_RESOURCE,
-
-  allowPort: function ADBProtocolHandler_allowPort(port, scheme)
-  {
-    return false;
-  },
-
-  newChannel: function ADBProtocolHandler_newChannel(uri)
-  {
-    if (!uri.host)
-      return new ADBChannel(uri);
-    var path;
-    if (uri.path == '/') {
-      path = baseURL + '/framebuffer.html';
-    } else if (uri.path == '/adb.jsm') {
-      path = baseURL + '/adb.jsm';
-    } else {
-      throw 'Error';
-    }
-
-    var channel = Services.io.newChannel(path, null, null);
-    var principal = Services.scriptSecurityManager.getSystemPrincipal(uri);
-    channel.originalURI = uri;
-    channel.owner = principal;
-    return channel;
-  },
-
-  getURIFlags: function(uri)
-  {
-    return Ci.nsIAboutModule.URI_SAFE_FOR_UNTRUSTED_CONTENT | Ci.nsIAboutModule.ALLOW_SCRIPT;
-  },
-
-  newURI: function ADBProtocolHandler_newURI(spec, charset, baseURI)
-  {
-    var uri = Cc['@mozilla.org/network/standard-url;1'].createInstance(Ci.nsIStandardURL);
-    uri.init(Ci.nsIStandardURL.URLTYPE_AUTHORITY, -1, spec, charset, baseURI);
-    return uri;
+ADBViewProtocolHandler.prototype.classDescription = 'ADB View Protocol Handler';
+ADBViewProtocolHandler.prototype.classID = Components.ID('{cdd72632-8743-4532-8ff5-bd9ffd95f1b9}');
+ADBViewProtocolHandler.prototype.contractID = '@mozilla.org/network/protocol;1?name=adbview';
+ADBViewProtocolHandler.prototype.scheme = 'adbview';
+ADBViewProtocolHandler.prototype.newChannel = function ADBViewProtocolHandler_newChannel(uri)
+{
+  if (!uri.host)
+    return new ADBChannel(uri);
+  var path;
+  if (uri.path == '/') {
+    path = baseURL + '/framebuffer.html';
+  } else if (uri.path == '/adb.jsm') {
+    path = baseURL + '/adb.jsm';
+  } else {
+    throw 'Error';
   }
+
+  var channel = Services.io.newChannel(path, null, null);
+  var principal = Services.scriptSecurityManager.getSystemPrincipal(uri);
+  channel.originalURI = uri;
+  channel.owner = principal;
+  return channel;
+};
+
+ADBViewProtocolHandler.prototype.getURIFlags = function(uri)
+{
+  return Ci.nsIAboutModule.URI_SAFE_FOR_UNTRUSTED_CONTENT | Ci.nsIAboutModule.ALLOW_SCRIPT;
 };
 
 const ADBViewProtocolHandlerFactory = XPCOMUtils.generateNSGetFactory([ADBViewProtocolHandler])(ADBViewProtocolHandler.prototype.classID);
