@@ -75,15 +75,38 @@ ADBChannel.prototype = {
           if (d.status != 'offline')
             data += '201: ' + d.serial + ' 0 Thu,%201%20Jan%201970%2000:00:00%20GMT DIRECTORY\n';
         }
-
-        var stream = Cc["@mozilla.org/io/string-input-stream;1"].createInstance(Ci.nsIStringInputStream);
-        stream.setData(data, data.length);
-        that._pump = Cc["@mozilla.org/network/input-stream-pump;1"].createInstance(Ci.nsIInputStreamPump);
-        that._pump.init(stream, -1, -1, 0, 0, true);
-        that._pump.asyncRead(that, null);
+        that._pumpData(data);
       });
     else
-      that.onStopRequest(that, null, Cr.NS_ERROR_FILE_NOT_FOUND);
+      ADB.devices(function (devices) {
+        var matching = [d for each (d in devices) if (d.serial.toLowerCase() == that._uri.host)];
+        if (matching.length > 1) {
+          that.onStopRequest(that, null, Cr.NS_ERROR_MALFORMED_URI);
+          throw 'Ambiguous serial';
+        }
+
+        ADB.stat(matching[0].serial, that._uri.path, function (stat) {
+          if (stat.mode & 0x4000)
+            ADB.dirList(matching[0].serial, that._uri.path, function(dentries) {
+              that.contentType = 'application/http-index-format';
+              var data = '300: ' + that._uri.spec + '\n' +
+                         '200: filename content-length last-modified file-type\n';
+              for each (var d in dentries) {
+                if (['.', '..'].every(function(n) n != d.name))
+                  data += '201: ' + d.name + ' ' + d.size + ' ' + encodeURI(d.time.toUTCString()) + ' ' + (d.mode & 0x4000 ? 'DIRECTORY' : (d.mode & 0xa000 == 0xa000 ? 'SYMLINK' : 'FILE')) + '\n';
+              }
+              that._pumpData(data);
+            });
+          else {
+            that.contentType = 'text/plain';
+            that.contentLength = stat.size;
+            var pipe = Cc['@mozilla.org/pipe;1'].createInstance(Ci.nsIPipe);
+            pipe.init(false, false, 0, 0, null);
+            that._pumpStream(pipe.inputStream);
+            ADB.getContent(matching[0].serial, that._uri.path, pipe.outputStream);
+          }
+        });
+      });
   },
 
   /* nsIRequest */
@@ -142,6 +165,19 @@ ADBChannel.prototype = {
     if (this.loadGroup)
       this.loadGroup.removeRequest(this, null, status);
   },
+
+  /* private */
+  _pumpStream: function ADBChannel_pumpStream(stream) {
+    this._pump = Cc['@mozilla.org/network/input-stream-pump;1'].createInstance(Ci.nsIInputStreamPump);
+    this._pump.init(stream, -1, -1, 0, 0, true);
+    this._pump.asyncRead(this, null);
+  },
+
+  _pumpData: function ADBChannel_pumpData(data) {
+    var stream = Cc['@mozilla.org/io/string-input-stream;1'].createInstance(Ci.nsIStringInputStream);
+    stream.setData(data, data.length);
+    this._pumpStream(stream);
+  }
 };
 
 function ADBProtocolHandler() {}
@@ -165,41 +201,7 @@ ADBProtocolHandler.prototype = {
 
   newChannel: function ADBProtocolHandler_newChannel(uri)
   {
-    if (!uri.host)
-      return new ADBChannel(uri);
-
-    var channel = Cc['@mozilla.org/network/input-stream-channel;1'].createInstance(Ci.nsIInputStreamChannel);
-    var pipe = Cc['@mozilla.org/pipe;1'].createInstance(Ci.nsIPipe);
-    pipe.init(true, false, 0, 0, null);
-    channel.setURI(uri);
-    channel.contentStream = pipe.inputStream;
-    channel.QueryInterface(Ci.nsIChannel);
-    ADB.devices(function (devices) {
-      var matching = [d for each (d in devices) if (d.serial.toLowerCase() == uri.host)];
-      if (matching.length > 1)
-        throw 'Ambiguous serial';
-
-      ADB.stat(matching[0].serial, uri.path, function (stat) {
-        if (stat.mode & 0x4000)
-          ADB.dirList(matching[0].serial, uri.path, function(dentries) {
-            channel.contentType = 'application/http-index-format';
-            var data = '300: ' + uri.spec + '\n' +
-                       '200: filename content-length last-modified file-type\n';
-            for each (var d in dentries) {
-              if (['.', '..'].every(function(n) n != d.name))
-                data += '201: ' + d.name + ' ' + d.size + ' ' + encodeURI(d.time.toUTCString()) + ' ' + (d.mode & 0x4000 ? 'DIRECTORY' : (d.mode & 0xa000 == 0xa000 ? 'SYMLINK' : 'FILE')) + '\n';
-            }
-
-            pipe.outputStream.write(data, data.length);
-            pipe.outputStream.close();
-          });
-        else {
-          channel.contentLength = stat.size;
-          ADB.getContent(matching[0].serial, uri.path, pipe.outputStream);
-        }
-      });
-    });
-    return channel;
+    return new ADBChannel(uri);
   },
 
   newURI: function ADBProtocolHandler_newURI(spec, charset, baseURI)
