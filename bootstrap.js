@@ -17,6 +17,21 @@ Cu.import('resource://gre/modules/Services.jsm');
 
 var baseURL = null;
 
+var convert5to8 = [];
+for (var i = 0; i < Math.pow(2, 5); i++)
+  convert5to8[i] = (i * 527 + 23) >> 6;
+var convert6to8 = [];
+for (var i = 0; i < Math.pow(2, 6); i++)
+  convert6to8[i] = (i * 259 + 33) >> 6;
+
+function mulTableFor(width) {
+  if (width == 5)
+    return convert5to8;
+  if (width == 6)
+    return convert6to8;
+  throw 'Unsupported';
+}
+
 /* Parts of the channel implementation are stolen from
  * browser/components/thumbnails/PageThumbsProtocol.js */
 function ADBChannel(uri) {
@@ -85,27 +100,61 @@ ADBChannel.prototype = {
           throw 'Ambiguous serial';
         }
 
-        ADB.stat(matching[0].serial, that._uri.path, function (stat) {
-          if (stat.mode & 0x4000)
-            ADB.dirList(matching[0].serial, that._uri.path, function(dentries) {
-              that.contentType = 'application/http-index-format';
-              var data = '300: ' + that._uri.spec + '\n' +
-                         '200: filename content-length last-modified file-type\n';
-              for each (var d in dentries) {
-                if (['.', '..'].every(function(n) n != d.name))
-                  data += '201: ' + d.name + ' ' + d.size + ' ' + encodeURI(d.time.toUTCString()) + ' ' + (d.mode & 0x4000 ? 'DIRECTORY' : (d.mode & 0xa000 == 0xa000 ? 'SYMLINK' : 'FILE')) + '\n';
+        if (that._uri.scheme == 'adb')
+          ADB.stat(matching[0].serial, that._uri.path, function (stat) {
+            if (stat.mode & 0x4000)
+              ADB.dirList(matching[0].serial, that._uri.path, function(dentries) {
+                that.contentType = 'application/http-index-format';
+                var data = '300: ' + that._uri.spec + '\n' +
+                           '200: filename content-length last-modified file-type\n';
+                for each (var d in dentries) {
+                  if (['.', '..'].every(function(n) n != d.name))
+                    data += '201: ' + d.name + ' ' + d.size + ' ' + encodeURI(d.time.toUTCString()) + ' ' + (d.mode & 0x4000 ? 'DIRECTORY' : (d.mode & 0xa000 == 0xa000 ? 'SYMLINK' : 'FILE')) + '\n';
+                }
+                that._pumpData(data);
+              });
+            else {
+              that.contentType = 'text/plain';
+              that.contentLength = stat.size;
+              var pipe = Cc['@mozilla.org/pipe;1'].createInstance(Ci.nsIPipe);
+              pipe.init(false, false, 0, 0, null);
+              that._pumpStream(pipe.inputStream);
+              ADB.getContent(matching[0].serial, that._uri.path, pipe.outputStream);
+            }
+          });
+        else
+          ADB.getFrameBuffer(matching[0].serial, function (image) {
+            var encoder = Cc['@mozilla.org/image/encoder;2?type=image/png'].createInstance().QueryInterface(Ci.imgIEncoder);
+            if (image.depth == 32 &&
+                image.redOffset == 0 && image.redWidth == 8 &&
+                image.greenOffset == 8 && image.greenWidth == 8 &&
+                image.blueOffset == 16 && image.blueWidth == 8 &&
+                image.alphaOffset == 24 && image.alphaWidth == 8) {
+              var data = new Array(image.size);
+              for (var i = 0; i < image.size; i++) { data[i] = image.data.charCodeAt(i); }
+              encoder.initFromData(data, image.width * image.height * 4, image.width, image.height, image.width * 4, Ci.imgIEncoder.INPUT_FORMAT_RGBA, '');
+            } else if (image.depth == 16 && image.alphaWidth == 0) {
+              var redShift = image.redOffset;
+              var greenShift = image.greenOffset;
+              var blueShift = image.blueOffset;
+              var redMask = (Math.pow(2, image.redWidth) - 1) << redShift;
+              var greenMask = (Math.pow(2, image.greenWidth) - 1) << greenShift;
+              var blueMask = (Math.pow(2, image.blueWidth) - 1) << blueShift;
+              var redMul = mulTableFor(image.redWidth);
+              var greenMul = mulTableFor(image.greenWidth);
+              var blueMul = mulTableFor(image.blueWidth);
+              var data = new Array(image.width * image.height * 3);
+              for (var i = 0; i < image.size / 2; i++) {
+                var pixel = image.data.charCodeAt(i * 2) + (image.data.charCodeAt(i * 2 + 1) << 8);
+                data[i * 3] = redMul[(pixel & redMask) >> redShift];
+                data[i * 3 + 1] = greenMul[(pixel & greenMask) >> greenShift];
+                data[i * 3 + 2] = blueMul[(pixel & blueMask) >> blueShift];
               }
-              that._pumpData(data);
-            });
-          else {
-            that.contentType = 'text/plain';
-            that.contentLength = stat.size;
-            var pipe = Cc['@mozilla.org/pipe;1'].createInstance(Ci.nsIPipe);
-            pipe.init(false, false, 0, 0, null);
-            that._pumpStream(pipe.inputStream);
-            ADB.getContent(matching[0].serial, that._uri.path, pipe.outputStream);
-          }
-        });
+              encoder.initFromData(data, image.width * image.height * 3, image.width, image.height, image.width * 3, Ci.imgIEncoder.INPUT_FORMAT_RGB, '');
+            }
+            that.contentType = 'image/png';
+            that._pumpStream(encoder);
+          });
       });
   },
 
@@ -194,6 +243,11 @@ GenericADBProtocolHandler.prototype = {
     return false;
   },
 
+  newChannel: function ADBProtocolHandler_newChannel(uri)
+  {
+    return new ADBChannel(uri);
+  },
+
   newURI: function ADBProtocolHandler_newURI(spec, charset, baseURI)
   {
     var uri = Cc['@mozilla.org/network/standard-url;1'].createInstance(Ci.nsIStandardURL);
@@ -209,10 +263,6 @@ ADBProtocolHandler.prototype.classDescription = 'ADB Protocol Handler';
 ADBProtocolHandler.prototype.classID = Components.ID('{f783fdc4-239a-4f5e-a7d9-c60874996c13}');
 ADBProtocolHandler.prototype.contractID = '@mozilla.org/network/protocol;1?name=adb';
 ADBProtocolHandler.prototype.scheme = 'adb';
-ADBProtocolHandler.prototype.newChannel = function ADBProtocolHandler_newChannel(uri)
-{
-  return new ADBChannel(uri);
-};
 
 const ADBProtocolHandlerFactory = XPCOMUtils.generateNSGetFactory([ADBProtocolHandler])(ADBProtocolHandler.prototype.classID);
 
@@ -224,30 +274,6 @@ ADBViewProtocolHandler.prototype.classDescription = 'ADB View Protocol Handler';
 ADBViewProtocolHandler.prototype.classID = Components.ID('{cdd72632-8743-4532-8ff5-bd9ffd95f1b9}');
 ADBViewProtocolHandler.prototype.contractID = '@mozilla.org/network/protocol;1?name=adbview';
 ADBViewProtocolHandler.prototype.scheme = 'adbview';
-ADBViewProtocolHandler.prototype.newChannel = function ADBViewProtocolHandler_newChannel(uri)
-{
-  if (!uri.host)
-    return new ADBChannel(uri);
-  var path;
-  if (uri.path == '/') {
-    path = baseURL + '/framebuffer.html';
-  } else if (uri.path == '/adb.jsm') {
-    path = baseURL + '/adb.jsm';
-  } else {
-    throw 'Error';
-  }
-
-  var channel = Services.io.newChannel(path, null, null);
-  var principal = Services.scriptSecurityManager.getSystemPrincipal(uri);
-  channel.originalURI = uri;
-  channel.owner = principal;
-  return channel;
-};
-
-ADBViewProtocolHandler.prototype.getURIFlags = function(uri)
-{
-  return Ci.nsIAboutModule.URI_SAFE_FOR_UNTRUSTED_CONTENT | Ci.nsIAboutModule.ALLOW_SCRIPT;
-};
 
 const ADBViewProtocolHandlerFactory = XPCOMUtils.generateNSGetFactory([ADBViewProtocolHandler])(ADBViewProtocolHandler.prototype.classID);
 
