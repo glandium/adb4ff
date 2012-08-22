@@ -7,6 +7,7 @@
 const Cc = Components.classes;
 const Ci = Components.interfaces;
 const CC = Components.Constructor;
+const Cr = Components.results;
 const BinaryInputStream = CC('@mozilla.org/binaryinputstream;1', 'nsIBinaryInputStream', 'setInputStream');
 const Sts = Cc['@mozilla.org/network/socket-transport-service;1'].getService(Ci.nsISocketTransportService);
 
@@ -167,13 +168,71 @@ let ADB = {
   }
 };
 
+function pickADBExecutable() {
+  var filePicker = Cc['@mozilla.org/filepicker;1'].createInstance(Ci.nsIFilePicker);
+  filePicker.init(Services.wm.getMostRecentWindow(null), 'Select adb location', Ci.nsIFilePicker.modeOpen);
+  var filter = (Services.appinfo.OS == 'WINNT') ? 'adb.exe' : 'adb';
+  filePicker.appendFilter(filter, filter);
+  if (filePicker.show() == Ci.nsIFilePicker.returnOK) {
+    Services.prefs.setCharPref('extensions.adb4ff@glandium.org.adb', filePicker.file.path);
+    return filePicker.file;
+  } else {
+    // Cancel
+  }
+}
+
+function startADBServer() {
+  var adb;
+  try {
+    var file = Services.prefs.getCharPref('extensions.adb4ff@glandium.org.adb');
+    adb = Cc['@mozilla.org/file/local;1'].createInstance(Ci.nsILocalFile);
+    adb.initWithPath(file);
+  } catch(e) {
+    adb = pickADBExecutable();
+  }
+  while (true) {
+    var process = Cc['@mozilla.org/process/util;1'].createInstance(Ci.nsIProcess);
+    try {
+      process.init(adb);
+      process.run(true, ['start-server'], 1);
+      return;
+    } catch(e) {
+      adb = pickADBExecutable();
+    }
+  }
+}
+
 function ADBClient() {
-  var transport = Sts.createTransport(null, 0, 'localhost', 5037, null);
-  this.input = transport.openInputStream(0 /* No flags */, 0, 0);
-  this.output = transport.openOutputStream(0 /* No flags */, 0, 0);
+  this.connected = false;
 }
 
 ADBClient.prototype = Object.freeze({
+  _connect: function ADBClient_connect(callback) {
+    var that = this;
+    var transport = Sts.createTransport(null, 0, 'localhost', 5037, null);
+    transport.setEventSink({ onTransportStatus: function (transport, status, progress, progressmax) {
+        if (status == Ci.nsISocketTransport.STATUS_CONNECTED_TO) {
+          that.connected = true;
+          callback.call(that);
+        }
+      }
+    }, Services.tm.currentThread);
+    this.input = transport.openInputStream(0 /* No flags */, 0, 0);
+    this.input.asyncWait({ onInputStreamReady: function(input) {
+        try {
+          input.available();
+        } catch(e) {
+          if (e.result != Cr.NS_BASE_STREAM_CLOSED) {
+            startADBServer();
+            that._connect(callback);
+            return;
+          }
+        }
+      }
+    }, 0, 0, Services.tm.currentThread);
+    this.output = transport.openOutputStream(0 /* No flags */, 0, 0);
+  },
+
   /**
    * Opens a service on the ADB host
    *
@@ -182,6 +241,16 @@ ADBClient.prototype = Object.freeze({
    *                   In the callback, 'this' is the ADBClient object.
    */
   hostService: function ADBClient_hostService(service, callback) {
+    if (this.connected) {
+      this._hostService(service, callback);
+      return;
+    }
+    this._connect(function () {
+      this._hostService(service, callback);
+    });
+  },
+
+  _hostService: function ADBClient__hostService(service, callback) {
     this.writeString(service, function () {
       this.read(4, function (data) {
         switch (data) {
