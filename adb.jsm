@@ -60,7 +60,7 @@ let ADB = {
         var time = read_uint32(data, 12);
         var length = read_uint32(data, 16);
         this.read(length, function (data) {
-          dentries.push({ name: data, mode: mode, size: size, time: new Date(time * 1000) });
+          dentries.push({ name: data, mode: mode, size: size, mtime: new Date(time * 1000) });
           read_dentry.call(this);
         });
       });
@@ -83,7 +83,7 @@ let ADB = {
    * @param path      The path to get stat for.
    * @param callback  A function to be called ...
    */
-  stat: function ADB_getType(serial, path, callback) {
+  stat: function ADB_stat(serial, path, callback) {
     var client = new ADBClient();
     client.hostService('host:transport:' + serial, function () {
       this.hostService('sync:', function () {
@@ -94,7 +94,7 @@ let ADB = {
             var mode = read_uint32(data, 4);
             var size = read_uint32(data, 8);
             var time = read_uint32(data, 12);
-            callback.call(this, { mode: mode, size: size, time: new Date(time * 1000) });
+            callback.call(this, { mode: mode, size: size, mtime: new Date(time * 1000) });
           });
         });
       });

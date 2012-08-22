@@ -82,16 +82,7 @@ ADBChannel.prototype = {
     var that = this;
 
     if (!this._uri.host)
-      ADB.devices(function(devices) {
-        that.contentType = 'application/http-index-format';
-        var data = '300: ' + that._uri.scheme + ':///\n' +
-                   '200: filename content-length last-modified file-type\n';
-        for each (var d in devices) {
-          if (d.status != 'offline')
-            data += '201: ' + d.serial + ' 0 Thu,%201%20Jan%201970%2000:00:00%20GMT DIRECTORY\n';
-        }
-        that._pumpData(data);
-      });
+      this._devicesList();
     else
       ADB.devices(function (devices) {
         var matching = [d for each (d in devices) if (d.serial.toLowerCase() == that._uri.host)];
@@ -103,24 +94,9 @@ ADBChannel.prototype = {
         if (that._uri.scheme == 'adb')
           ADB.stat(matching[0].serial, that._uri.path, function (stat) {
             if (stat.mode & 0x4000)
-              ADB.dirList(matching[0].serial, that._uri.path, function(dentries) {
-                that.contentType = 'application/http-index-format';
-                var data = '300: ' + that._uri.spec + '\n' +
-                           '200: filename content-length last-modified file-type\n';
-                for each (var d in dentries) {
-                  if (['.', '..'].every(function(n) n != d.name))
-                    data += '201: ' + d.name + ' ' + d.size + ' ' + encodeURI(d.time.toUTCString()) + ' ' + (d.mode & 0x4000 ? 'DIRECTORY' : (d.mode & 0xa000 == 0xa000 ? 'SYMLINK' : 'FILE')) + '\n';
-                }
-                that._pumpData(data);
-              });
-            else {
-              that.contentType = 'text/plain';
-              that.contentLength = stat.size;
-              var pipe = Cc['@mozilla.org/pipe;1'].createInstance(Ci.nsIPipe);
-              pipe.init(false, false, 0, 0, null);
-              that._pumpStream(pipe.inputStream);
-              ADB.getContent(matching[0].serial, that._uri.path, pipe.outputStream);
-            }
+              that._directoryIndex(matching[0].serial, that._uri.path);
+            else
+              that._fileContents(matching[0].serial, that._uri.path, stat.size);
           });
         else
           ADB.getFrameBuffer(matching[0].serial, function (image) {
@@ -156,6 +132,39 @@ ADBChannel.prototype = {
             that._pumpStream(encoder);
           });
       });
+  },
+
+  _generateIndex: function ADBChannel_generateIndex(title, files) {
+    this.contentType = 'application/http-index-format';
+    var data = '300: ' + title + '\n' +
+               '200: filename content-length last-modified file-type\n';
+    for each (var f in files) {
+      data += '201: ' + f.name + ' ' + f.size + ' ' + encodeURI(f.mtime.toUTCString()) + ' ' + (f.mode & 0x4000 ? 'DIRECTORY' : (f.mode & 0xa000 == 0xa000 ? 'SYMLINK' : 'FILE')) + '\n';
+    }
+    this._pumpData(data);
+  },
+
+  _devicesList: function ADBChannel_devicesList() {
+    var that = this;
+    ADB.devices(function(devices) {
+      that._generateIndex(that._uri.scheme + ':///', [{name: d.serial, size: 0, mtime: new Date(0), mode: 0x4000} for each (d in devices) if (d.status != 'offline')]);
+    });
+  },
+
+  _directoryIndex: function ADBChannel_directoryIndex(device, path) {
+    var that = this;
+    ADB.dirList(device, path, function(dentries) {
+      that._generateIndex(path, [d for each (d in dentries) if (['.', '..'].every(function(n) n != d.name))]);
+    });
+  },
+
+  _fileContents: function ADBChannel_fileContents(device, path, size) {
+    this.contentType = 'text/plain';
+    this.contentLength = size;
+    var pipe = Cc['@mozilla.org/pipe;1'].createInstance(Ci.nsIPipe);
+    pipe.init(false, false, 0, 0, null);
+    this._pumpStream(pipe.inputStream);
+    ADB.getContent(device, path, pipe.outputStream);
   },
 
   /* nsIRequest */
