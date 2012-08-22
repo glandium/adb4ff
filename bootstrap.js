@@ -99,38 +99,7 @@ ADBChannel.prototype = {
               that._fileContents(matching[0].serial, that._uri.path, stat.size);
           });
         else
-          ADB.getFrameBuffer(matching[0].serial, function (image) {
-            var encoder = Cc['@mozilla.org/image/encoder;2?type=image/png'].createInstance().QueryInterface(Ci.imgIEncoder);
-            if (image.depth == 32 &&
-                image.redOffset == 0 && image.redWidth == 8 &&
-                image.greenOffset == 8 && image.greenWidth == 8 &&
-                image.blueOffset == 16 && image.blueWidth == 8 &&
-                image.alphaOffset == 24 && image.alphaWidth == 8) {
-              var data = new Array(image.size);
-              for (var i = 0; i < image.size; i++) { data[i] = image.data.charCodeAt(i); }
-              encoder.initFromData(data, image.width * image.height * 4, image.width, image.height, image.width * 4, Ci.imgIEncoder.INPUT_FORMAT_RGBA, '');
-            } else if (image.depth == 16 && image.alphaWidth == 0) {
-              var redShift = image.redOffset;
-              var greenShift = image.greenOffset;
-              var blueShift = image.blueOffset;
-              var redMask = (Math.pow(2, image.redWidth) - 1) << redShift;
-              var greenMask = (Math.pow(2, image.greenWidth) - 1) << greenShift;
-              var blueMask = (Math.pow(2, image.blueWidth) - 1) << blueShift;
-              var redMul = mulTableFor(image.redWidth);
-              var greenMul = mulTableFor(image.greenWidth);
-              var blueMul = mulTableFor(image.blueWidth);
-              var data = new Array(image.width * image.height * 3);
-              for (var i = 0; i < image.size / 2; i++) {
-                var pixel = image.data.charCodeAt(i * 2) + (image.data.charCodeAt(i * 2 + 1) << 8);
-                data[i * 3] = redMul[(pixel & redMask) >> redShift];
-                data[i * 3 + 1] = greenMul[(pixel & greenMask) >> greenShift];
-                data[i * 3 + 2] = blueMul[(pixel & blueMask) >> blueShift];
-              }
-              encoder.initFromData(data, image.width * image.height * 3, image.width, image.height, image.width * 3, Ci.imgIEncoder.INPUT_FORMAT_RGB, '');
-            }
-            that.contentType = 'image/png';
-            that._pumpStream(encoder);
-          });
+          that._framebuffer(matching[0].serial);
       });
   },
 
@@ -165,6 +134,41 @@ ADBChannel.prototype = {
     pipe.init(false, false, 0, 0, null);
     this._pumpStream(pipe.inputStream);
     ADB.getContent(device, path, pipe.outputStream);
+  },
+
+  _framebuffer: function ADBChannel_framebuffer(device) {
+    this.contentType = 'image/png';
+    var encoder = Cc['@mozilla.org/image/encoder;2?type=image/png'].createInstance().QueryInterface(Ci.imgIEncoder);
+    this._pumpStream(encoder);
+    ADB.getFrameBuffer(device, function (image) {
+      if (image.depth == 32 &&
+          image.redOffset == 0 && image.redWidth == 8 &&
+          image.greenOffset == 8 && image.greenWidth == 8 &&
+          image.blueOffset == 16 && image.blueWidth == 8 &&
+          image.alphaOffset == 24 && image.alphaWidth == 8) {
+        var data = new Array(image.size);
+        for (var i = 0; i < image.size; i++) { data[i] = image.data.charCodeAt(i); }
+        encoder.initFromData(data, image.width * image.height * 4, image.width, image.height, image.width * 4, Ci.imgIEncoder.INPUT_FORMAT_RGBA, '');
+      } else if (image.depth == 16 && image.alphaWidth == 0) {
+        var redShift = image.redOffset;
+        var greenShift = image.greenOffset;
+        var blueShift = image.blueOffset;
+        var redMask = (Math.pow(2, image.redWidth) - 1) << redShift;
+        var greenMask = (Math.pow(2, image.greenWidth) - 1) << greenShift;
+        var blueMask = (Math.pow(2, image.blueWidth) - 1) << blueShift;
+        var redMul = mulTableFor(image.redWidth);
+        var greenMul = mulTableFor(image.greenWidth);
+        var blueMul = mulTableFor(image.blueWidth);
+        var data = new Array(image.width * image.height * 3);
+        for (var i = 0; i < image.size / 2; i++) {
+          var pixel = image.data.charCodeAt(i * 2) + (image.data.charCodeAt(i * 2 + 1) << 8);
+          data[i * 3] = redMul[(pixel & redMask) >> redShift];
+          data[i * 3 + 1] = greenMul[(pixel & greenMask) >> greenShift];
+          data[i * 3 + 2] = blueMul[(pixel & blueMask) >> blueShift];
+        }
+        encoder.initFromData(data, image.width * image.height * 3, image.width, image.height, image.width * 3, Ci.imgIEncoder.INPUT_FORMAT_RGB, '');
+      }
+    });
   },
 
   /* nsIRequest */
