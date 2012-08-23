@@ -290,6 +290,60 @@ ADBViewProtocolHandler.prototype.scheme = 'adbview';
 
 const ADBViewProtocolHandlerFactory = XPCOMUtils.generateNSGetFactory([ADBViewProtocolHandler])(ADBViewProtocolHandler.prototype.classID);
 
+var ADBWindowListener = {
+  onOpenWindow: function ADBWindowListener_onOpenWindow(window) {
+    var win = window.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowInternal);
+    win.addEventListener("load", function ADBWindowListener_onOpenWindow_onLoad(event) {
+      win.removeEventListener(event.name, ADBWindowListener_onOpenWindow_onLoad, false);
+      if (win.location.href != 'chrome://browser/content/debugger.xul')
+        return;
+      // Monkeypatch RemoteDebuggerPrompt.show
+      var RemoteDebuggerPrompt = win.document.defaultView.wrappedJSObject.RemoteDebuggerPrompt;
+      var Prefs = win.document.defaultView.wrappedJSObject.Prefs;
+      var L10N = win.document.defaultView.wrappedJSObject.L10N;
+      var show = RemoteDebuggerPrompt.prototype.show;
+      RemoteDebuggerPrompt.prototype.show = function ADBRemoteDebuggerPrompt_show(isReconnectingFlag) {
+        var args = Cc["@mozilla.org/hash-property-bag;1"].createInstance(Ci.nsIWritablePropertyBag2).QueryInterface(Ci.nsIWritablePropertyBag);
+        args.setProperty('baseURL', baseURL);
+        args.setProperty('title', L10N.getStr('remoteDebuggerPromptTitle'));
+        args.setProperty('prompt', L10N.getStr('remoteDebuggerPromptMessage'));
+        args.setProperty('remoteHost', Prefs.remoteHost);
+        args.setProperty('remotePort', Prefs.remotePort);
+        Services.ww.openWindow(win, 'chrome://adb4ff/content/RemoteDebuggerPrompt.xul', '_blank', 'centerscreen,chrome,modal,titlebar,dialog', args);
+        if (!args.getProperty('ok')) {
+          return false;
+        }
+        var device = args.getProperty('device');
+        var host = args.getProperty('remoteHost');
+        var port = args.getProperty('remotePort');
+        if (device == 'local') {
+          this.remote = { host: host, port: port };
+          delete Prefs.device;
+          delete Prefs.deviceHost;
+        } else {
+          this.remote = { host: Prefs.remoteHost, port: port };
+          Prefs.device = device;
+          Prefs.deviceHost = host;
+        }
+
+        return true;
+      };
+      // Monkeypatch debuggerSocketConnect
+      var tmp = {}
+      Cu.import('resource://gre/modules/devtools/dbg-client.jsm', tmp);
+      var debuggerSocketConnect = tmp.debuggerSocketConnect;
+      win.document.defaultView.wrappedJSObject.debuggerSocketConnect = function ADBdebuggerSocketConnect(host, port) {
+        if ('device' in Prefs)
+          return ADB.getDebuggerTransport(Prefs.device, Prefs.deviceHost, port);
+        return debuggerSocketConnect(host, port);
+      };
+    });
+  },
+
+  onCloseWindow: function(window) { },
+  onWindowTitleChange: function(window, title) { }
+};
+
 function startup(aData, aReason) {
   Cm.registerFactory(ADBProtocolHandler.prototype.classID,
                      ADBProtocolHandler.prototype.classDescription,
@@ -299,12 +353,14 @@ function startup(aData, aReason) {
                      ADBViewProtocolHandler.prototype.classDescription,
                      ADBViewProtocolHandler.prototype.contractID,
                      ADBViewProtocolHandlerFactory);
+  Services.wm.addListener(ADBWindowListener);
   baseURL = aData.resourceURI.spec;
   Cu.import(baseURL + '/adb.jsm');
 }
 
 function shutdown(aData, aReason) {
   Cu.unload(baseURL + '/adb.jsm');
+  Services.wm.removeListener(ADBWindowListener);
   Cm.unregisterFactory(ADBProtocolHandler.prototype.classID, ADBProtocolHandlerFactory);
   Cm.unregisterFactory(ADBViewProtocolHandler.prototype.classID, ADBViewProtocolHandlerFactory);
 }

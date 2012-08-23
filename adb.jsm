@@ -8,10 +8,11 @@ const Cc = Components.classes;
 const Ci = Components.interfaces;
 const CC = Components.Constructor;
 const Cr = Components.results;
+const Cu = Components.utils;
 const BinaryInputStream = CC('@mozilla.org/binaryinputstream;1', 'nsIBinaryInputStream', 'setInputStream');
 const Sts = Cc['@mozilla.org/network/socket-transport-service;1'].getService(Ci.nsISocketTransportService);
 
-Components.utils.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
 
 let EXPORTED_SYMBOLS = ['ADB'];
 
@@ -167,6 +168,25 @@ let ADB = {
       callback(image);
       return true;
     });
+  },
+
+  getDebuggerTransport: function ADB_getDebuggerTransport(serial, host, port) {
+    var service = (host == 'localhost') ? 'tcp:' + port : 'tcp:' + port + ':' + host;
+    var client = new ADBClient();
+    var tmp = {};
+    Cu.import('resource://gre/modules/devtools/dbg-client.jsm', tmp);
+    client.ready = function() {
+      client.send = tmp.DebuggerTransport.prototype.send;
+    };
+    client.connectDeviceService(serial, service, function () {
+      this._converter = Cc['@mozilla.org/intl/scriptableunicodeconverter'].createInstance(Ci.nsIScriptableUnicodeConverter);
+      this._converter.charset = 'UTF-8';
+      this._processIncoming = tmp.DebuggerTransport.prototype._processIncoming;
+      this._nextHandlers.push(this._processIncoming);
+      this.onDataAvailable = tmp.DebuggerTransport.prototype.onDataAvailable;
+      return true;
+    });
+    return client;
   }
 };
 
@@ -219,7 +239,7 @@ function ADBClient() {
   this._connect();
 }
 
-ADBClient.prototype = Object.freeze({
+ADBClient.prototype = {
   _connect: function ADBClient_connect() {
     var that = this;
     var transport = Sts.createTransport(null, 0, 'localhost', 5037, null);
@@ -365,4 +385,4 @@ ADBClient.prototype = Object.freeze({
       this.sendData(request + le_length + dir, handler);
     });
   },
-});
+};

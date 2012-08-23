@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
+
+<?xml-stylesheet href="chrome://global/skin/global.css" type="text/css"?>
+<!DOCTYPE dialog SYSTEM "chrome://global/locale/commonDialog.dtd">
+
+<dialog xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+        onload="dialogOnLoad()"
+        ondialogaccept="return dialogOK();">
+
+  <script type="application/javascript" src="chrome://adb4ff/content/RemoteDebuggerPrompt.js" />
+  <vbox style="width: 24em;margin: 5px;">
+    <vbox>
+      <label value="Select a device" control="device"/>
+      <menulist id="device" onpopupshown="refreshDevices(this)" oncommand="switchDevice(this)">
+        <menupopup>
+          <menuitem label="local" value="local"/>
+        </menupopup>
+      </menulist>
+    </vbox>
+    <vbox>
+      <label id="remote-label" control="remote"/>
+      <textbox id="remote"/>
+    </vbox>
+  </vbox>
+</dialog>
