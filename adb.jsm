@@ -303,7 +303,7 @@ ADBClient.prototype = {
           this._incomingHandler = this._nextHandlers.shift();
       } while (this._incomingHandler && this._incomingHandler());
     } catch (e) {
-      Services.console.logStringMessage(e);
+      Cu.reportError(e);
       this.close();
     }
   },
